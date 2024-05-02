@@ -66,13 +66,76 @@ export const LinebotEvent = z.object({
 
 export type LinebotEvent = z.infer<typeof LinebotEvent>
 
+
+const LineBotTextMessage = z.object({
+		type: z.literal("text"),
+		text: z.string()
+})
+
+const LineBotFlexMessage = z.object({
+	type: z.literal("flex"),
+	altText: z.string(),
+	contents: z.object({
+		type: z.literal("bubble"),
+		body: z.object({
+			type: z.literal("box"),
+			layout: z.literal("horizontal").or(z.literal("vertical")),
+			contents: z.object({
+				type: z.literal("text"),
+				text: z.string()
+			}).array()
+		})
+	})
+})
 export const LinebotSendMessages = z.object({
 	replyToken: z.string().optional(),
 	to: z.string().optional(),
-	messages: z.object({
-		type: z.enum(["text"]),
-		text: z.string()
-	}).array()
+	messages: z.union([
+		LineBotTextMessage,
+		LineBotFlexMessage
+	]).array()
 })
 
+
 export type LinebotSendMessages = z.infer<typeof LinebotSendMessages>
+
+const newPingCoord = (
+	title: string,
+	cityName: string,
+	coords: string
+) => {
+	return LineBotFlexMessage.parse({
+		type: "flex",
+		altText: "Interactive Notification",
+		contents:
+			{
+				"type": "bubble", // 1
+				"body": {
+					// 2
+					"type": "box", // 3
+					"layout": "vertical", // 4
+					"contents": [
+						// 5
+						{
+							"type": "text", // 6
+							"text": title
+						},
+						{
+							"type": "text", // 6
+							"text": cityName
+						},
+						{
+							"type": "text", // 6
+							"text": coords
+						}
+					]
+				}
+			}
+	})
+}
+
+export const pingCards = [
+	newPingCoord("Ping 1", "Kinmen Island", "24.42695125386981, 118.22488092750645"),
+	newPingCoord("Ping 2", "Taipei", "25.033916607697982, 121.565390818944"),
+	newPingCoord("Ping 3", "Kaohsuing", "22.76081208289122, 120.24882050572171")
+]

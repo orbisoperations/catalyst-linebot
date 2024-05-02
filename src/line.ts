@@ -11,6 +11,7 @@ export class LineAPI {
 	}
 
 	async reply(replyBody: LinebotSendMessages) {
+		console.log(replyBody)
 		return await fetch(
 			`${this.baseUrl}/v2/bot/message/reply`, {
 				method: "POST",

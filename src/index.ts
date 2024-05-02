@@ -3,16 +3,17 @@ import {Env} from "../worker-configuration"
 export {LineBotState} from "./do"
 import {Hono} from "hono"
 import {LineBotState} from "./do"
+// @ts-ignore
 import { Buffer } from 'node:buffer';
 import {
 	LinebotEvent,
 	LinebotSendMessages,
 	LinebotMessageEvent,
 	LinebotUnfollowEvent,
-	LinebotFollowEvent
+	LinebotFollowEvent,
+	pingCards
 } from './types';
 import { LineAPI} from './line';
-import { boolean } from 'zod';
 
 function safeCompare(a: Buffer, b: Buffer): boolean {
 	if (a.length !== b.length) {
@@ -127,7 +128,7 @@ app.use('/', async (c) => {
 			messages: [
 				{
 					type: "text",
-					text: "Hello Friend!"
+					text: demoSwitch ? "Please select a message from the catalog" : "Hello Friend"
 				}
 			]
 		})
@@ -140,17 +141,19 @@ app.use('/', async (c) => {
 	}))
 
 
-	const welcomeMsg = `Welcome to Catalyst, ${c.env.DEMO_ACTIVE ? "the demo is currently in progress.":"nothing to see here yet."}`
+	const welcomeMsg = `Welcome to Catalyst, ${demoSwitch ? "the demo is currently in progress.":"nothing to see here yet."}`
 	console.log("processing follows", welcomeMsg)
 	const followReps = await Promise.all(followQ.map(async (message) => {
 		await stub.trackUser(message.source.userId)
+		console.log("sending:", pingCards[0])
 		return lineAPI.reply({
 			replyToken: message.replyToken,
 			messages: [
 				{
 					type: "text",
 					text: welcomeMsg
-				}
+				},
+				...pingCards
 			]
 		})
 	}))
