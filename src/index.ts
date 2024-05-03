@@ -1,3 +1,57 @@
+import {DurableObject, WorkerEntrypoint} from "cloudflare:workers"
+import {Env} from "../worker-configuration"
+export {LineBotState} from "./do"
+import {Hono} from "hono"
+import {LineBotState} from "./do"
+import { Buffer } from 'node:buffer';
+import {
+	LinebotEvent,
+	LinebotSendMessages,
+	LinebotMessageEvent,
+	LinebotUnfollowEvent,
+	LinebotFollowEvent
+} from './types';
+import { LineAPI} from './line';
+import { boolean } from 'zod';
+
+function safeCompare(a: Buffer, b: Buffer): boolean {
+	if (a.length !== b.length) {
+		return false;
+	}
+	return crypto.subtle.timingSafeEqual(a, b);
+}
+
+async function validateSignature(secret: string, body: string, signatureHeader?: string) {
+	//console.log("creating hmac functions")
+	const encoder = new TextEncoder()
+	const encodedKey = encoder.encode(secret)
+	const encodedData = encoder.encode(body)
+	const hmacKey = await crypto.subtle.importKey(
+		'raw',
+		encodedKey,
+		{
+			name: "HMAC",
+			hash: "SHA-256"
+		},
+		true,
+		['sign', 'verify']
+	)
+
+	const rawDigest = await crypto.subtle.sign(
+		'HMAC',
+		hmacKey,
+		encodedData
+	)
+	const digest = Buffer.from(Buffer.from(rawDigest).toString("base64"))
+	const signature = Buffer.from(signatureHeader?? "")
+	//console.log(`digest: ${digest}`)
+	//console.log(`signature: ${signature}`)
+	const valid = safeCompare(digest, signature)
+	return valid
+}
+
+
+
 /**
  * Welcome to Cloudflare Workers! This is your first Durable Objects application.
  *
@@ -12,50 +66,107 @@
  */
 
 /** A Durable Object's behavior is defined in an exported Javascript class */
-export class MyDurableObject {
-	/**
-	 * The constructor is invoked once upon creation of the Durable Object, i.e. the first call to
-	 * 	`DurableObjectStub::get` for a given identifier
-	 *
-	 * @param state - The interface for interacting with Durable Object state
-	 * @param env - The interface to reference bindings declared in wrangler.toml
-	 */
-	constructor(state: DurableObjectState, env: Env) {}
-
-	/**
-	 * The Durable Object fetch handler will be invoked when a Durable Object instance receives a
-	 * 	request from a Worker via an associated stub
-	 *
-	 * @param request - The request submitted to a Durable Object instance from a Worker
-	 * @returns The response to be sent back to the Worker
-	 */
-	async fetch(request: Request): Promise<Response> {
-		return new Response('Hello World');
-	}
+type bindings = {
+	LineBotState: DurableObjectNamespace<LineBotState>
+	LINE_CHANNEL_TOKEN: string
+	LINE_CHANNEL_SECRET: string
+	DEMO_ACTIVE: string
 }
+const app: Hono<{Bindings: bindings}> = new Hono()
+app.use('/', async (c) => {
+	const lineAPI = new LineAPI(c.env.LINE_CHANNEL_TOKEN)
+	const id = c.env.LineBotState.idFromName("default")
+	const stub = c.env.LineBotState.get(id)
+	// set/disable alarm first thing - sets to value of demo
+	const demoSwitch = c.env.DEMO_ACTIVE === "true" ? true : false
+	const alarmVal = await stub.alarmInit(demoSwitch)
+	console.log("next alarm: ", alarmVal)
 
-export default {
-	/**
-	 * This is the standard fetch handler for a Cloudflare Worker
-	 *
-	 * @param request - The request submitted to the Worker from the client
-	 * @param env - The interface to reference bindings declared in wrangler.toml
-	 * @param ctx - The execution context of the Worker
-	 * @returns The response to be sent back to the client
-	 */
-	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-		// We will create a `DurableObjectId` using the pathname from the Worker request
-		// This id refers to a unique instance of our 'MyDurableObject' class above
-		let id: DurableObjectId = env.MY_DURABLE_OBJECT.idFromName(new URL(request.url).pathname);
+	// get on with chatbot stuff
+	const body = await c.req.text()
+	console.log("body", JSON.parse(body))
 
-		// This stub creates a communication channel with the Durable Object instance
-		// The Durable Object constructor will be invoked upon the first call for a given id
-		let stub: DurableObjectStub = env.MY_DURABLE_OBJECT.get(id);
+	const valid = validateSignature(c.env.LINE_CHANNEL_SECRET, body, c.req.header("x-line-signature"))
+	if (!valid) {
+		// web hook response should always return 200
+		console.error("invalid signature - ignoring message")
+		return c.status(200)
+	}
 
-		// We call `fetch()` on the stub to send a request to the Durable Object instance
-		// The Durable Object instance will invoke its fetch handler to handle the request
-		let response = await stub.fetch(request);
+	console.log("message is valid")
 
-		return response;
-	},
+	const event = LinebotEvent.parse(JSON.parse(body))
+
+	let followQ: LinebotFollowEvent[] = []
+	let unfollowQ: LinebotUnfollowEvent[] = []
+	let messagesQ: LinebotMessageEvent[] = []
+	event.events.forEach(event => {
+			const { success: unfollowSuccess, data: unfollowData } = LinebotUnfollowEvent.safeParse(event)
+			if (unfollowSuccess && unfollowData) {
+				unfollowQ.push(unfollowData)
+			}
+
+		const { success: messageSuccess, data: messageData } = LinebotMessageEvent.safeParse(event)
+		if (messageSuccess && messageData) {
+			messagesQ.push(messageData)
+		}
+
+		const {success: followSuccess, data: followData} = LinebotFollowEvent.safeParse(event)
+		if (followSuccess && followData) {
+			followQ.push(followData)
+		}
+
+	})
+
+	console.log("message queues created: ", followQ.length, unfollowQ.length, messagesQ.length)
+
+	console.log("processing messages")
+	const msgResps = await Promise.all(messagesQ.map(async (message) => {
+		return lineAPI.reply({
+			replyToken: message.replyToken,
+			messages: [
+				{
+					type: "text",
+					text: "Hello Friend!"
+				}
+			]
+		})
+	}))
+	console.log("responses:", JSON.stringify(msgResps))
+
+	console.log("processing unfollows")
+	await Promise.all(unfollowQ.map(async (message) => {
+		return stub.removeUser(message.source.userId)
+	}))
+
+
+	const welcomeMsg = `Welcome to Catalyst, ${c.env.DEMO_ACTIVE ? "the demo is currently in progress.":"nothing to see here yet."}`
+	console.log("processing follows", welcomeMsg)
+	const followReps = await Promise.all(followQ.map(async (message) => {
+		await stub.trackUser(message.source.userId)
+		return lineAPI.reply({
+			replyToken: message.replyToken,
+			messages: [
+				{
+					type: "text",
+					text: welcomeMsg
+				}
+			]
+		})
+	}))
+	console.log("follow repsonses: ", followReps)
+
+	//const  id = c.env.LineBotState.idFromName("default")
+	//const stub = c.env.LineBotState.get(id)
+	console.log("returning 200")
+	return c.status( 200)
+})
+export default class LineBotWorker extends WorkerEntrypoint<Env>{
+	async fetch(request: Request): Promise<Response> {
+		const resp = await app.fetch(request, this.env, this.ctx)
+		console.log(JSON.stringify(resp))
+		return new Response(null, {
+			status: 200
+		})
+	}
 };
