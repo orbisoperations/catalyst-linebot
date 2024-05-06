@@ -1,5 +1,5 @@
 import {z} from "zod"
-
+import { generate, count } from "random-words";
 export const LinebotMessageEvent = z.object({
 	type: z.enum(["message"]),
 	message: z.object({
@@ -183,6 +183,12 @@ const newPingCoord = (
 
 const newPingCarousel = (coords: { title: string, cityName: string, coords: string }[]) => {
 	const bubbles = coords.map(coord => {
+		const random = generate({
+			exactly: 3,
+			wordsPerString: 1,
+			formatter: (word) => word.toUpperCase(),
+			join: "__"
+		})
 		return {
 			"type": "bubble", // 1
 			"body": {
@@ -200,6 +206,10 @@ const newPingCarousel = (coords: { title: string, cityName: string, coords: stri
 					},
 					{
 						"type": "text", // 6
+						"text": `UID: ${random}`
+					},
+					{
+						"type": "text", // 6
 						"text": coord.coords
 					},
 					{
@@ -207,7 +217,12 @@ const newPingCarousel = (coords: { title: string, cityName: string, coords: stri
 						"action": {
 							type: "postback",
 							label: "Send",
-							data: coord.coords,
+							data: new URLSearchParams({
+								title: coord.title,
+								city: coord.cityName,
+								latlong: coord.coords.replace(" ",""),
+								randomPhrase: random
+							}).toString(),
 						},
 						"style": "primary",
 					}
