@@ -8,5 +8,6 @@ interface Env {
 	LINE_CHANNEL_SECRET: string
 	DEMO_ACTIVE: string
 	CATALYST_JWK_URL: string
+	RAPID_API_KEY: string
 }
 

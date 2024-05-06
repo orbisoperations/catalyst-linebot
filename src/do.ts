@@ -71,6 +71,31 @@ export class LineBotState extends DurableObject<Env> {
 		await this.ctx.storage.put("users", [])
 	}
 
+	async storePingEvent(ping: PingEvent) {
+		console.log("storing ping")
+		await this.ctx.blockConcurrencyWhile(async () => {
+			const pings = await this.ctx.storage.get<PingEvent[]>("pings") ?? []
+			pings.push({
+				latlong: ping.latlong,
+				expiry: (Date.now() + (1 * 60 * 1000)), // 1m x 60s x 1000ms,
+				city: ping.city,
+				title: ping.title,
+				randomPhrase: ping.randomPhrase
+			})
+			console.log(pings)
+			await this.ctx.storage.put("pings", pings)
+		})
+		console.log("post ping storing")
+		return {
+			coords: new URLSearchParams({
+				latlong: ping.latlong,
+				expiry: String((Date.now() + (1 * 60 * 1000))), // 1m x 60s x 1000ms,
+				city: ping.city,
+				title: ping.title,
+				randomPhrase: ping.randomPhrase
+			}).toString()
+		}
+	}
 	async storePostback(msg: LinebotPostbackEvent) {
 		console.log("storing ping")
 		await this.ctx.blockConcurrencyWhile(async () => {
