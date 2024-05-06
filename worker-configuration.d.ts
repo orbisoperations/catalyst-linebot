@@ -9,5 +9,6 @@ interface Env {
 	DEMO_ACTIVE: string
 	CATALYST_JWK_URL: string
 	RAPID_API_KEY: string
+	CATALYST_APP_ID: string
 }
 

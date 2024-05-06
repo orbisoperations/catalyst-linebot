@@ -23,7 +23,7 @@ export default createSchema({
         Query: {
             pings: async (_, {}, c: Context) => {
                 const demoSwitch = c.env.DEMO_ACTIVE === "true" ? true : false
-                if (!demoSwitch) return []
+                if (!demoSwitch || !Boolean(c.get('valid'))) return []
                 const id = c.env.LineBotState.idFromName("default")
                 const   stub: DurableObjectStub<LineBotState> = c.env.LineBotState.get(id)
                 const pings: PingEvent[] = await stub.getPostbackData()
