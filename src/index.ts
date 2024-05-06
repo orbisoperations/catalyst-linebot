@@ -82,6 +82,9 @@ type bindings = {
 }
 const app: Hono<{Bindings: bindings}> = new Hono()
 app.use("/graphql", async (c) => {
+	console.log("getting jwtks from ", c.env.CATALYST_JWK_URL)
+	const jwksResp = await fetch(c.env.CATALYST_JWK_URL)
+	console.log(jwksResp.status, jwksResp.statusText, await jwksResp.text())
 	const JWKS = createRemoteJWKSet(new URL(c.env.CATALYST_JWK_URL))
 	console.log("starting graphql")
 	console.log(JWKS)
