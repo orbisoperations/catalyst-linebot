@@ -10,7 +10,7 @@ routes = [
 ]
 
 [vars]
-DEMO_ACTIVE = "false"
+DEMO_ACTIVE = "true"
 CATALYST_JWK_URL = "https://gateway.catalyst.devintelops.io/.well-known/jwks.json"
 CATALYST_APP_ID = "99e90dc9-0bb8-4af4-9c50-e1b33ac8c746"
 

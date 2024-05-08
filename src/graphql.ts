@@ -7,7 +7,7 @@ type LinePing {
     city: String!
     lat: String
     lon: String!
-    expiry: Int!
+    expiry: Float!
     title: String!
     UID: String!
 }

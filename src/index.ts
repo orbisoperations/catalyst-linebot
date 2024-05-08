@@ -170,9 +170,10 @@ app.use('/', async (c) => {
 			// if message follows format then try and create ping out of it
 			const elems = message.message.text.split(".").filter(element => element.replace(" ","").length > 0)
 			console.log(elems)
-			if (elems.length == 2) {
+			if (elems.length > 1) {
 				const msg = elems[0]
 				const locq = elems[1]
+				console.log("doing geo query")
 				const resp = await fetch('https://maptoolkit.p.rapidapi.com/geocode/search?' + new URLSearchParams({
 					q: locq,
 					countrycodes: 'TW,US',
@@ -207,7 +208,7 @@ app.use('/', async (c) => {
 						exactly: 3,
 						wordsPerString: 1,
 						formatter: (word) => word.toUpperCase(),
-						join: "__"
+						join: "_"
 					})
 					const replyMessage = await stub.storePingEvent({
 						title: msg,
@@ -223,6 +224,16 @@ app.use('/', async (c) => {
 							{
 								type: "text",
 								text: replyMessage.coords
+							},
+						]
+					})
+				} else {
+					await lineAPI.reply({
+						replyToken: message.replyToken,
+						messages: [
+							{
+								type: "text",
+								text: `Unable to geolocate from message \"${message.message.text}\"`
 							},
 						]
 					})
@@ -254,6 +265,7 @@ app.use('/', async (c) => {
 	const followReps = await Promise.all(followQ.map(async (message) => {
 		await stub.trackUser(message.source.userId)
 		console.log("sending:", pingCards[0])
+		const extraMessages = demoSwitch ? [pingCarousel] : []
 		return await lineAPI.reply({
 			replyToken: message.replyToken,
 			messages: [
@@ -261,7 +273,7 @@ app.use('/', async (c) => {
 					type: "text",
 					text: welcomeMsg
 				},
-				pingCarousel
+				...extraMessages
 			]
 		})
 	}))
