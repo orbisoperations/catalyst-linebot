@@ -22,6 +22,7 @@ function safeCompare(a: Buffer, b: Buffer): boolean {
 	if (a.length !== b.length) {
 		return false;
 	}
+	// @ts-ignore
 	return crypto.subtle.timingSafeEqual(a, b);
 }
 

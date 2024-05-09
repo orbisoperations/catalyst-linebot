@@ -1,14 +1,15 @@
 import { DurableObject } from 'cloudflare:workers';
 import {Env} from '../worker-configuration';
 import { LineAPI} from './line';
-import { LinebotPostbackEvent } from './types';
+import { LinebotPostbackEvent, pingCards } from './types';
 
 
 const LOOP_S = 30
-
 export interface PingEvent {
-	coords: string
-	message: string
+	title: string
+	city: string
+	latlong: string
+	randomPhrase: string
 	expiry: number
 }
 export class LineBotState extends DurableObject<Env> {
@@ -34,7 +35,7 @@ export class LineBotState extends DurableObject<Env> {
 		const lineAPI = new LineAPI(this.env.LINE_CHANNEL_TOKEN)
 		console.log("tracked user loop", users)
 		const messages = pings.map((ping, index) => {
-			return `${index}: \n\t Coordinates: ${ping.coords} \n\texpires in: ${(ping.expiry - Date.now())/1000}s`
+			return `${ping.randomPhrase}: \n\t Coordinates: ${ping.latlong} \n\texpires in: ${(ping.expiry - Date.now())/1000}s`
 		})
 
 		if (pings.length > 0) {
@@ -74,10 +75,13 @@ export class LineBotState extends DurableObject<Env> {
 		console.log("storing ping")
 		await this.ctx.blockConcurrencyWhile(async () => {
 			const pings = await this.ctx.storage.get<PingEvent[]>("pings") ?? []
+			const searchParams = new URLSearchParams(msg.postback.data);
 			pings.push({
-				coords: msg.postback.data,
+				latlong: searchParams.has("latlong") ? searchParams.get("latlong")! : "no latlong provided",
 				expiry: (Date.now() + (1 * 60 * 1000)), // 1m x 60s x 1000ms,
-				message: ""
+				city: searchParams.has("city") ? searchParams.get("city")! : "no city provided",
+				title: searchParams.has("title") ? searchParams.get("title")! : "no title provided",
+				randomPhrase: searchParams.has("randomPhrase") ? searchParams.get("randomPhrase")! : "no UID provided"
 			})
 			console.log(pings)
 			await this.ctx.storage.put("pings", pings)
