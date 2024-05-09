@@ -6,6 +6,7 @@ import {LineBotState} from "./do"
 import { createYoga } from "graphql-yoga";
 import gqlSchema from "./graphql"
 import {createRemoteJWKSet, jwtVerify} from "jose"
+import { generate, count } from "random-words";
 // @ts-ignore
 import { Buffer } from 'node:buffer';
 import {
@@ -77,6 +78,7 @@ type bindings = {
 	LINE_CHANNEL_SECRET: string
 	DEMO_ACTIVE: string
 	CATALYST_JWK_URL: string
+	RAPID_API_KEY: string
 }
 const app: Hono<{Bindings: bindings}> = new Hono()
 app.use("/graphql", async (c) => {
@@ -153,6 +155,70 @@ app.use('/', async (c) => {
 
 	console.log("processing messages")
 	const msgResps = await Promise.all(messagesQ.map(async (message) => {
+		if (message.message && demoSwitch) {
+			console.log("doing geolookup for ", message.message)
+			// if message follows format then try and create ping out of it
+			const elems = message.message.text.split(".").filter(element => element.replace(" ","").length > 0)
+			console.log(elems)
+			if (elems.length == 2) {
+				const msg = elems[0]
+				const locq = elems[1]
+				const resp = await fetch('https://maptoolkit.p.rapidapi.com/geocode/search?' + new URLSearchParams({
+					q: locq,
+					countrycodes: 'TW,US',
+					language: 'en',
+					limit: '1'
+				}),
+					{
+						method: "GET",
+						headers: {
+							'X-RapidAPI-Key': c.env.RAPID_API_KEY,
+							'X-RapidAPI-Host': 'maptoolkit.p.rapidapi.com'
+						}
+					})
+
+				const jsonBody = await resp.json<{
+					lat: string,
+					lon: string,
+					display_name: string,
+					address: {
+						neighbourhood: string,
+						suburb: string,
+						village: string,
+						city: string,
+						country: string,
+						postcode: string
+					}
+				}[]>()
+
+				console.log(jsonBody)
+				if (jsonBody.length > 0) {
+					const random = generate({
+						exactly: 3,
+						wordsPerString: 1,
+						formatter: (word) => word.toUpperCase(),
+						join: "__"
+					})
+					const replyMessage = await stub.storePingEvent({
+						title: msg,
+						city: `${jsonBody[0].address.neighbourhood}, ${jsonBody[0].address.suburb}, ${jsonBody[0].address.village}, ${jsonBody[0].address.city}`,
+						latlong: `${jsonBody[0].lat}, ${jsonBody[0].lon}`,
+						randomPhrase: random,
+						expiry: 0 // this is overwritten in the DO
+					})
+
+					await lineAPI.reply({
+						replyToken: message.replyToken,
+						messages: [
+							{
+								type: "text",
+								text: replyMessage.coords
+							},
+						]
+					})
+				}
+			}
+		}
 		const extraMessages = demoSwitch ? [pingCarousel] : []
 		return lineAPI.reply({
 			replyToken: message.replyToken,
