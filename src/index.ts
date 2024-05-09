@@ -3,6 +3,9 @@ import {Env} from "../worker-configuration"
 export {LineBotState} from "./do"
 import {Hono} from "hono"
 import {LineBotState} from "./do"
+import { createYoga } from "graphql-yoga";
+import gqlSchema from "./graphql"
+import {createRemoteJWKSet, jwtVerify} from "jose"
 // @ts-ignore
 import { Buffer } from 'node:buffer';
 import {
@@ -72,8 +75,25 @@ type bindings = {
 	LINE_CHANNEL_TOKEN: string
 	LINE_CHANNEL_SECRET: string
 	DEMO_ACTIVE: string
+	CATALYST_JWK_URL: string
 }
 const app: Hono<{Bindings: bindings}> = new Hono()
+app.use("/graphql", async (c) => {
+	const JWKS = createRemoteJWKSet(new URL(c.env.CATALYST_JWK_URL))
+	console.log("starting graphql")
+	console.log(JWKS)
+	const token = c.req.header("Authorization") ? c.req.header("Authorization")!.split(" ")[1] : ""
+	const { payload, protectedHeader } = await jwtVerify(token, JWKS)
+	console.log(protectedHeader)
+	console.log(payload)
+	const yoga = createYoga({
+		schema: gqlSchema,
+		graphqlEndpoint: "/graphql",
+	  });
+	  console.log("graphql handler")
+	  return yoga.handle(c.req.raw as Request, c);
+})
+
 app.use('/', async (c) => {
 	const lineAPI = new LineAPI(c.env.LINE_CHANNEL_TOKEN)
 	const id = c.env.LineBotState.idFromName("default")
@@ -192,12 +212,9 @@ app.use('/', async (c) => {
 	console.log("returning 200")
 	return c.status( 200)
 })
+
 export default class LineBotWorker extends WorkerEntrypoint<Env>{
 	async fetch(request: Request): Promise<Response> {
-		const resp = await app.fetch(request, this.env, this.ctx)
-		console.log(JSON.stringify(resp))
-		return new Response(null, {
-			status: 200
-		})
+		return app.fetch(request, this.env, this.ctx)
 	}
 };

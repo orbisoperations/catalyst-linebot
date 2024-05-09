@@ -6,8 +6,9 @@ import { LinebotPostbackEvent } from './types';
 
 const LOOP_S = 30
 
-interface PingEvent {
+export interface PingEvent {
 	coords: string
+	message: string
 	expiry: number
 }
 export class LineBotState extends DurableObject<Env> {
@@ -75,7 +76,8 @@ export class LineBotState extends DurableObject<Env> {
 			const pings = await this.ctx.storage.get<PingEvent[]>("pings") ?? []
 			pings.push({
 				coords: msg.postback.data,
-				expiry: (Date.now() + (1 * 60 * 1000)) // 1m x 60s x 1000ms
+				expiry: (Date.now() + (1 * 60 * 1000)), // 1m x 60s x 1000ms,
+				message: ""
 			})
 			console.log(pings)
 			await this.ctx.storage.put("pings", pings)

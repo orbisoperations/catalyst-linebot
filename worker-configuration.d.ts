@@ -7,5 +7,6 @@ interface Env {
 	LINE_CHANNEL_TOKEN: string
 	LINE_CHANNEL_SECRET: string
 	DEMO_ACTIVE: string
+	CATALYST_JWK_URL: string
 }
 
