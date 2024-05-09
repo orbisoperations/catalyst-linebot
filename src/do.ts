@@ -2,13 +2,15 @@ import { DurableObject } from 'cloudflare:workers';
 import {Env} from '../worker-configuration';
 import { LineAPI} from './line';
 
+
+const LOOP_S = 1000
 export class LineBotState extends DurableObject<Env> {
 
 	async alarmInit(enabled: boolean) {
 		if (enabled) {
 			const  currentAlarm = await this.ctx.storage.getAlarm();
 			if (currentAlarm == null) {
-				await this.ctx.storage.setAlarm(Date.now() + 10 * 1000) // 10 seconds
+				await this.ctx.storage.setAlarm(Date.now() + (LOOP_S * 1000)) // 30 seconds
 			}
 		} else {
 			await this.ctx.storage.deleteAlarm()
@@ -22,8 +24,8 @@ export class LineBotState extends DurableObject<Env> {
 		// THIS ALARM WILL TRIGGER EVER 10S
 		// and currently just sends Ping
 		const lineAPI = new LineAPI(this.env.LINE_CHANNEL_TOKEN)
-		console.log("users", users)
-		await Promise.all(Array.from(users).map(async (user) => {
+		console.log("tracked user loop", users)
+		/*await Promise.all(Array.from(users).map(async (user) => {
 			return lineAPI.push({
 				to: user,
 				messages: [
@@ -33,9 +35,9 @@ export class LineBotState extends DurableObject<Env> {
 					}
 				]
 			})
-		}))
+		}))*/
 		// reset alarm
-		await this.ctx.storage.setAlarm(Date.now() + 10 * 1000) // 10 seconds
+		await this.ctx.storage.setAlarm(Date.now() + (LOOP_S * 1000)) // 100 seconds
 	}
 	async trackUser(userId: string) {
 		let users = await this.ctx.storage.get<string[]>("users")?? []
