@@ -11,7 +11,7 @@ import {
 	LinebotMessageEvent,
 	LinebotUnfollowEvent,
 	LinebotFollowEvent,
-	pingCards
+	pingCards, pingCarousel, LinebotPostbackEvent
 } from './types';
 import { LineAPI} from './line';
 
@@ -81,6 +81,9 @@ app.use('/', async (c) => {
 	// set/disable alarm first thing - sets to value of demo
 	const demoSwitch = c.env.DEMO_ACTIVE === "true" ? true : false
 	const alarmVal = await stub.alarmInit(demoSwitch)
+	if (!demoSwitch) {
+		await stub.removeAllUsers()
+	}
 	console.log("next alarm: ", alarmVal)
 
 	// get on with chatbot stuff
@@ -101,6 +104,7 @@ app.use('/', async (c) => {
 	let followQ: LinebotFollowEvent[] = []
 	let unfollowQ: LinebotUnfollowEvent[] = []
 	let messagesQ: LinebotMessageEvent[] = []
+	let postbackQ: LinebotPostbackEvent[] = []
 	event.events.forEach(event => {
 			const { success: unfollowSuccess, data: unfollowData } = LinebotUnfollowEvent.safeParse(event)
 			if (unfollowSuccess && unfollowData) {
@@ -117,19 +121,26 @@ app.use('/', async (c) => {
 			followQ.push(followData)
 		}
 
+		const {success: postbackSuccess, data: postBackData} = LinebotPostbackEvent.safeParse(event)
+		if (postbackSuccess && postBackData) {
+			postbackQ.push(postBackData)
+		}
+
 	})
 
 	console.log("message queues created: ", followQ.length, unfollowQ.length, messagesQ.length)
 
 	console.log("processing messages")
 	const msgResps = await Promise.all(messagesQ.map(async (message) => {
+		const extraMessages = demoSwitch ? [pingCarousel] : []
 		return lineAPI.reply({
 			replyToken: message.replyToken,
 			messages: [
 				{
 					type: "text",
 					text: demoSwitch ? "Please select a message from the catalog" : "Hello Friend"
-				}
+				},
+				...extraMessages
 			]
 		})
 	}))
@@ -146,18 +157,35 @@ app.use('/', async (c) => {
 	const followReps = await Promise.all(followQ.map(async (message) => {
 		await stub.trackUser(message.source.userId)
 		console.log("sending:", pingCards[0])
-		return lineAPI.reply({
+		return await lineAPI.reply({
 			replyToken: message.replyToken,
 			messages: [
 				{
 					type: "text",
 					text: welcomeMsg
 				},
-				...pingCards
+				pingCarousel
 			]
 		})
 	}))
 	console.log("follow repsonses: ", followReps)
+
+	console.log("processing postbacks")
+	const postbackResp = await Promise.all(postbackQ.map(async (message) => {
+		return stub.storePostback(message)
+	}))
+	const postbackReplyResp = await Promise.all(postbackResp.map(async (resp) => {
+		console.log("responding: ", resp)
+		return lineAPI.reply({
+			replyToken: resp.reply,
+			messages: [
+				{
+					type: "text",
+					text: `Sent: ${resp.coords}`
+				},
+			]
+		})
+	}))
 
 	//const  id = c.env.LineBotState.idFromName("default")
 	//const stub = c.env.LineBotState.get(id)
