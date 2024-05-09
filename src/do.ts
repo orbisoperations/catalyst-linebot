@@ -34,12 +34,72 @@ export class LineBotState extends DurableObject<Env> {
 		// and currently just sends Ping
 		const lineAPI = new LineAPI(this.env.LINE_CHANNEL_TOKEN)
 		console.log("tracked user loop", users)
-		const messages = pings.map((ping, index) => {
-			return `${ping.randomPhrase}: \n\t Coordinates: ${ping.latlong} \n\texpires in: ${(ping.expiry - Date.now())/1000}s`
+		const summaryMessage = `Summary of Current Events:\n`
+
+		// look at current line messages
+		const lineMessages = pings.map((ping, index) => {
+			return `Line Message: ${ping.title}\n\tUUID: ${ping.randomPhrase}\n\tCoords: ${ping.latlong}\n\texpires in: ${(ping.expiry - Date.now())/1000}s`
 		})
 
-		if (pings.length > 0) {
-			const message = `Summary of Current Events: \n${messages.join(" \n")}`
+		// get catalyst items
+		const query = `query {
+  TAK1Markers {
+    uid
+    callsign
+    lat
+    lon
+    namespace
+  }
+  TAK2Markers {
+    uid
+    callsign
+    lat
+    lon
+    namespace
+  }
+}`
+
+		const response = await fetch(this.env.CATALYST_GATEWAY_URL, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${this.env.CATALYST_GATEWAY_TOKEN}`,
+			},
+			body: JSON.stringify({query}),
+		});
+
+		const takJSON = await response.json()
+		console.log(takJSON)
+
+		let takItems = []
+		// @ts-ignore
+		takJSON.data.TAK2Markers.forEach(item => {
+			takItems.push({
+				"uid": item.uid,
+				"callsign": item.callsign,
+				"lat": item.lat,
+				"lon": item.lon,
+				"namespace": item.namespace
+			})
+		})
+		// @ts-ignore
+		takJSON.data.TAK1Markers.forEach(item => {
+			takItems.push({
+				"uid": item.uid,
+				"callsign": item.callsign,
+				"lat": item.lat,
+				"lon": item.lon,
+				"namespace": item.namespace
+			})
+		})
+
+		const takMessages = takItems.map(item => {
+			return `TAK Point: ${item.callsign}\n\tServer: ${item.namespace}\n\tCoords: ${item.lat}, ${item.lon}`
+		})
+
+
+		if (lineMessages.length > 0 || takMessages.length > 0) {
+			const message = `Summary of Current Events: \n${lineMessages.join(" \n")}\n${takMessages.join(" \n")}`
 			const reps = await Promise.all(Array.from(users).map(async (user) => {
 				return lineAPI.push({
 					to: user,
