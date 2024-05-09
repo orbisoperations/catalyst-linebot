@@ -78,20 +78,27 @@ type bindings = {
 	LINE_CHANNEL_SECRET: string
 	DEMO_ACTIVE: string
 	CATALYST_JWK_URL: string
+	CATALYST_APP_ID: string
 	RAPID_API_KEY: string
 }
-const app: Hono<{Bindings: bindings}> = new Hono()
+
+type Variables = {
+	valid: boolean
+}
+
+const app: Hono<{Bindings: bindings, Variables: Variables}> = new Hono()
 app.use("/graphql", async (c) => {
-	console.log("getting jwtks from ", c.env.CATALYST_JWK_URL)
-	const jwksResp = await fetch(c.env.CATALYST_JWK_URL)
-	console.log(jwksResp.status, jwksResp.statusText, await jwksResp.text())
 	const JWKS = createRemoteJWKSet(new URL(c.env.CATALYST_JWK_URL))
-	console.log("starting graphql")
-	console.log(JWKS)
 	const token = c.req.header("Authorization") ? c.req.header("Authorization")!.split(" ")[1] : ""
-	const { payload, protectedHeader } = await jwtVerify(token, JWKS)
-	console.log(protectedHeader)
-	console.log(payload)
+	let valid = false
+	try {
+		const { payload, protectedHeader } = await jwtVerify(token, JWKS)
+		valid = payload.claims != undefined && (payload.claims as string[]).includes(c.env.CATALYST_APP_ID)
+	} catch (e) {
+		console.error("error validating jwt: ", e)
+		valid = false
+	}
+	c.set('valid', valid)
 	const yoga = createYoga({
 		schema: gqlSchema,
 		graphqlEndpoint: "/graphql",
