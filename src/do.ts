@@ -42,7 +42,7 @@ export class LineBotState extends DurableObject<Env> {
 		})
 
 		// get catalyst items
-		const query = `query {
+		const queries = [`query {
   TAK1Markers {
     uid
     callsign
@@ -50,6 +50,8 @@ export class LineBotState extends DurableObject<Env> {
     lon
     namespace
   }
+}`,
+			`query {
   TAK2Markers {
     uid
     callsign
@@ -57,47 +59,60 @@ export class LineBotState extends DurableObject<Env> {
     lon
     namespace
   }
-}`
+}`]
 
-		const response = await fetch(this.env.CATALYST_GATEWAY_URL, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				'Authorization': `Bearer ${this.env.CATALYST_GATEWAY_TOKEN}`,
-			},
-			body: JSON.stringify({query}),
-		});
+		let takItems =
+			(await Promise.all(queries.map(async (query): Promise<{uid: string, callsign: string, lat: number, lon: number, namespace: string}[]> => {
+					const response = await fetch(this.env.CATALYST_GATEWAY_URL, {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							'Authorization': `Bearer ${this.env.CATALYST_GATEWAY_TOKEN}`,
+						},
+						body: JSON.stringify({ query }),
+					});
 
-		const takJSON = await response.json()
-		console.log(takJSON)
+					if (response.status != 200) {
+						console.error("error reading from tak", { response })
+						return [] as { uid: string, callsign: string, lat: number, lon: number, namespace: string }[]
+					}
 
-		let takItems = []
-		// @ts-ignore
-		takJSON.data.TAK2Markers.forEach(item => {
-			takItems.push({
-				"uid": item.uid,
-				"callsign": item.callsign,
-				"lat": item.lat,
-				"lon": item.lon,
-				"namespace": item.namespace
-			})
-		})
-		// @ts-ignore
-		takJSON.data.TAK1Markers.forEach(item => {
-			takItems.push({
-				"uid": item.uid,
-				"callsign": item.callsign,
-				"lat": item.lat,
-				"lon": item.lon,
-				"namespace": item.namespace
-			})
-		})
+					interface takData {
+						data: {
+							TAK1Markers?: { uid: string, callsign: string, lat: number, lon: number, namespace: string }[]
+							TAK2Markers?: { uid: string, callsign: string, lat: number, lon: number, namespace: string }[]
+
+						}
+						errors?: {
+							message: string,
+							location: any
+						} []
+					}
+
+					const takJSON = await response.json<takData>()
+					console.log("tak query", takJSON)
+					if (takJSON.errors !== undefined) {
+						console.log("tak errors", takJSON.errors)
+						return [] as { uid: string, callsign: string, lat: number, lon: number, namespace: string }[]
+					}
+
+					if (takJSON.data.TAK1Markers !== undefined) {
+						return takJSON.data.TAK1Markers
+					}
+
+					if (takJSON.data.TAK2Markers !== undefined) {
+						return takJSON.data.TAK2Markers
+					}
+
+					return [] as { uid: string, callsign: string, lat: number, lon: number, namespace: string }[]
+				}
+			))).flat(1)
 
 		const takMessages = takItems.map(item => {
 			return `TAK Point: ${item.callsign}\n\tServer: ${item.namespace}\n\tCoords: ${item.lat}, ${item.lon}`
 		})
 
-
+	console.log("tak messages", takMessages)
 		if (lineMessages.length > 0 || takMessages.length > 0) {
 			const message = `Summary of Current Events: \n${lineMessages.join(" \n")}\n${takMessages.join(" \n")}`
 			const reps = await Promise.all(Array.from(users).map(async (user) => {
