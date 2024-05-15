@@ -10,5 +10,7 @@ interface Env {
 	CATALYST_JWK_URL: string
 	RAPID_API_KEY: string
 	CATALYST_APP_ID: string
+	CATALYST_GATEWAY_URL: string
+	CATALYST_GATEWAY_TOKEN: string
 }
 
