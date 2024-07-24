@@ -12,5 +12,7 @@ interface Env {
 	CATALYST_APP_ID: string
 	CATALYST_GATEWAY_URL: string
 	CATALYST_GATEWAY_TOKEN: string
+	CF_STREAM_TOKEN: string
+	CF_ACCOUNT_ID: string
 }
 
