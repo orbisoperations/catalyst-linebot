@@ -80,6 +80,8 @@ type bindings = {
 	CATALYST_JWK_URL: string
 	CATALYST_APP_ID: string
 	RAPID_API_KEY: string
+	CF_STREAM_TOKEN: string
+	CF_ACCOUNT_ID: string
 }
 
 type Variables = {
@@ -165,92 +167,145 @@ app.use('/', async (c) => {
 
 	console.log("processing messages")
 	const msgResps = await Promise.all(messagesQ.map(async (message) => {
+		// if the demo is turned on do something
 		if (message.message && demoSwitch) {
-			console.log("doing geolookup for ", message.message)
-			// if message follows format then try and create ping out of it
-			const elems = message.message.text.split(".").filter(element => element.replace(" ","").length > 0)
-			console.log(elems)
-			if (elems.length > 1) {
-				const msg = elems[0]
-				const locq = elems[1]
-				console.log("doing geo query")
-				const resp = await fetch('https://maptoolkit.p.rapidapi.com/geocode/search?' + new URLSearchParams({
-					q: locq,
-					countrycodes: 'TW,US',
-					language: 'en',
-					limit: '1'
-				}),
-					{
-						method: "GET",
-						headers: {
-							'X-RapidAPI-Key': c.env.RAPID_API_KEY,
-							'X-RapidAPI-Host': 'maptoolkit.p.rapidapi.com'
+			// add routine to check video upload
+
+			const [pingSelector, videoSelector] = ["ping:", "video:"]
+
+			const [isPing, isVideo] = [
+				message.message.text.toLowerCase().startsWith(pingSelector),
+				message.message.text.toLowerCase().startsWith(videoSelector)
+			]
+
+			console.log("isPing: ", isPing, "isVideo: ", isVideo)
+			if (isPing) {
+				console.log("doing geolookup for: ", message.message)
+				const pingMsg = message.message.text.replace(pingSelector, "")
+				const elems = pingMsg.split(".").filter(element => element.replace(" ","").length > 0)
+				console.log(elems)
+				if (elems.length > 1)  { // ping message check
+					const msg = elems[0]
+					const locq = elems[1]
+					console.log("doing geo query")
+					const resp = await fetch('https://maptoolkit.p.rapidapi.com/geocode/search?' + new URLSearchParams({
+						q: locq,
+						countrycodes: 'TW,US',
+						language: 'en',
+						limit: '1'
+					}),
+						{
+							method: "GET",
+							headers: {
+								'X-RapidAPI-Key': c.env.RAPID_API_KEY,
+								'X-RapidAPI-Host': 'maptoolkit.p.rapidapi.com'
+							}
+						})
+
+					const jsonBody = await resp.json<{
+						lat: string,
+						lon: string,
+						display_name: string,
+						address: {
+							neighbourhood: string,
+							suburb: string,
+							village: string,
+							city: string,
+							country: string,
+							postcode: string
 						}
-					})
+					}[]>()
 
-				const jsonBody = await resp.json<{
-					lat: string,
-					lon: string,
-					display_name: string,
-					address: {
-						neighbourhood: string,
-						suburb: string,
-						village: string,
-						city: string,
-						country: string,
-						postcode: string
+					console.log(jsonBody)
+					if (jsonBody.length > 0) {
+						const random = generate({
+							exactly: 3,
+							wordsPerString: 1,
+							formatter: (word) => word.toUpperCase(),
+							join: "_"
+						})
+						const replyMessage = await stub.storePingEvent({
+							title: msg,
+							city: `${jsonBody[0].address.neighbourhood}, ${jsonBody[0].address.suburb}, ${jsonBody[0].address.village}, ${jsonBody[0].address.city}`,
+							latlong: `${jsonBody[0].lat}, ${jsonBody[0].lon}`,
+							randomPhrase: random,
+							expiry: 0 // this is overwritten in the DO
+						})
+
+						return await lineAPI.reply({
+							replyToken: message.replyToken,
+							messages: [
+								{
+									type: "text",
+									text: replyMessage.coords
+								},
+							]
+						})
+					} else {
+						return await lineAPI.reply({
+							replyToken: message.replyToken,
+							messages: [
+								{
+									type: "text",
+									text: `Unable to geolocate from message \"${message.message.text}\"`
+								},
+							]
+						})
 					}
-				}[]>()
-
-				console.log(jsonBody)
-				if (jsonBody.length > 0) {
-					const random = generate({
-						exactly: 3,
-						wordsPerString: 1,
-						formatter: (word) => word.toUpperCase(),
-						join: "_"
-					})
-					const replyMessage = await stub.storePingEvent({
-						title: msg,
-						city: `${jsonBody[0].address.neighbourhood}, ${jsonBody[0].address.suburb}, ${jsonBody[0].address.village}, ${jsonBody[0].address.city}`,
-						latlong: `${jsonBody[0].lat}, ${jsonBody[0].lon}`,
-						randomPhrase: random,
-						expiry: 0 // this is overwritten in the DO
-					})
-
-					await lineAPI.reply({
-						replyToken: message.replyToken,
-						messages: [
-							{
-								type: "text",
-								text: replyMessage.coords
-							},
-						]
-					})
-				} else {
-					await lineAPI.reply({
-						replyToken: message.replyToken,
-						messages: [
-							{
-								type: "text",
-								text: `Unable to geolocate from message \"${message.message.text}\"`
-							},
-						]
-					})
 				}
+			} else if (isVideo) {
+				console.log("doing video upload for: ", message.message)
+				const videoMsg = message.message.text.replace(videoSelector, "")
+				const breakChar = videoMsg.lastIndexOf(".")
+				const [videoLink, coordsString] = [videoMsg.substring(0, breakChar), videoMsg.substring(breakChar+1)]
+				console.log("video link: ", videoLink, "coords: ", coordsString)
+
+				/*
+				curl -X POST \
+  -d '{"url":"https://pub-05275deed7d1427893755b0d87bb7fbe.r2.dev/2024_05_23_13_48_47.MP4","meta":{"name":"2024_05_23_13_48_47.MP4"}}' \
+  -H "Authorization: Bearer ALNaPYNeKIAE8QwXIevAW_mw_fVzlrtHUughneel" \
+  https://api.cloudflare.com/client/v4/accounts/3be6f7bb0cc73869d555e1156586c1f2/stream/copy
+				 */
+				const videoURL = new URL(videoLink)
+				console.log("video url: ", videoURL)
+				console.log(`https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/stream/copy`)
+				console.log({body: JSON.stringify({
+						url: videoURL.toString(),
+						meta: {
+							name: coordsString + ".mp4"
+						}
+					})})
+				const videoUpload = await fetch(`https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/stream/copy`,
+					{
+					body: JSON.stringify({
+							url: videoURL.toString(),
+							meta: {
+								name: coordsString + ".mp4"
+							}
+						}),
+					headers: {
+							Authorization: `Bearer ${c.env.CF_STREAM_TOKEN}`,
+						},
+						method: "POST"
+					})
+
+				console.log("video upload response: ", await videoUpload.json())
+
+			} else { // send pings messages
+				const extraMessages = demoSwitch ? [pingCarousel] : []
+				return lineAPI.reply({
+					replyToken: message.replyToken,
+					messages: [
+						{
+							type: "text",
+							text: demoSwitch ? "Please select a message from the catalog" : "Hello Friend"
+						},
+						...extraMessages
+					]
+				})
 			}
 		}
-		const extraMessages = demoSwitch ? [pingCarousel] : []
-		return lineAPI.reply({
-			replyToken: message.replyToken,
-			messages: [
-				{
-					type: "text",
-					text: demoSwitch ? "Please select a message from the catalog" : "Hello Friend"
-				},
-				...extraMessages
-			]
-		})
+
 	}))
 	console.log("responses:", JSON.stringify(msgResps))
 
