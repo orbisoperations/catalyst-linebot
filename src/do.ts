@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import {Env} from '../worker-configuration';
 import { LineAPI} from './line';
 import { LinebotPostbackEvent, pingCards } from './types';
+import { promise } from 'zod';
 
 
 const LOOP_S = 30
@@ -12,6 +13,15 @@ export interface PingEvent {
 	randomPhrase: string
 	expiry: number
 }
+
+export interface VideoEvent {
+	uid: string
+	lat: string
+	lon: string
+	location: string
+	expiry: number
+}
+
 export class LineBotState extends DurableObject<Env> {
 
 	async alarmInit(enabled: boolean) {
@@ -193,11 +203,86 @@ export class LineBotState extends DurableObject<Env> {
 		}
 	}
 
+
+
 	async getPostbackData(): Promise<PingEvent[]> {
 		const pings = await this.ctx.storage.get<PingEvent[]>("pings") ?? []
 		const now = Date.now()
 		const validPings  = pings.filter(ping => ping.expiry > now)
 		await this.ctx.storage.put("pings", validPings)
 		return validPings
+	}
+
+	async storeVideoEvent(uid: string, location: string) {
+		console.log("storing video")
+
+		console.log("doing geo query")
+		const coordsresp = await fetch('https://maptoolkit.p.rapidapi.com/geocode/search?' + new URLSearchParams({
+			q: location,
+			countrycodes: 'TW,US',
+			language: 'en',
+			limit: '1'
+		}),
+			{
+				method: "GET",
+				headers: {
+					'X-RapidAPI-Key': this.env.RAPID_API_KEY,
+					'X-RapidAPI-Host': 'maptoolkit.p.rapidapi.com'
+				}
+			})
+
+		const coordsBody = await coordsresp.json<{
+			lat: string,
+			lon: string,
+			display_name: string,
+			address: {
+				neighbourhood: string,
+				suburb: string,
+				village: string,
+				city: string,
+				country: string,
+				postcode: string
+			}
+		}[]>()
+
+		console.log(coordsBody)
+		if (coordsBody.length < 1) {
+			return
+		}
+		await this.ctx.blockConcurrencyWhile(async () => {
+			const videos = await this.ctx.storage.get<VideoEvent[]>("videos") ?? []
+			videos.push({
+				location: location,
+				lat: coordsBody[0].lat,
+				lon: coordsBody[0].lon,
+				expiry: (Date.now() + (3 * 60 * 1000)), // 1m x 60s x 1000ms,
+				uid: uid
+			})
+			console.log(videos)
+			await this.ctx.storage.put("videos", videos)
+		})
+	}
+
+	async getVideoData() {
+		const videos = await this.ctx.storage.get<VideoEvent[]>("videos") ?? []
+		const now = Date.now()
+		const validVideos = videos.filter(video => video.expiry > now)
+		await this.ctx.storage.put("videos", validVideos)
+
+		const videoLinks = await Promise.all(videos.map(async (video) => {
+			const videoUpload = await fetch(`https://api.cloudflare.com/client/v4/accounts/${this.env.CF_ACCOUNT_ID}/stream/${video.uid}`, {
+				headers: {
+					Authorization: `Bearer ${this.env.CF_STREAM_TOKEN}`,
+					"Content-Type": "application/json"
+				},
+				method: "GET"
+			})
+			console.log("video upload repsonse status", videoUpload.status)
+			const resp = await videoUpload.json() as {success: boolean, result: {status: { state: string}, preview: string }}
+			return {...video, link: resp.result.preview, ready: resp.success && resp.result.status.state == "ready"}
+			//return [resp.success, resp.result.status.state, resp.result.preview]
+		}))
+		console.log("video status", videoLinks)
+		return videoLinks
 	}
 }

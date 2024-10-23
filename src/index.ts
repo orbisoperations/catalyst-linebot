@@ -18,6 +18,7 @@ import {
 	pingCards, pingCarousel, LinebotPostbackEvent
 } from './types';
 import { LineAPI} from './line';
+import { utf8Encoder } from 'hono/dist/types/utils/jwt/utf8';
 
 function safeCompare(a: Buffer, b: Buffer): boolean {
 	if (a.length !== b.length) {
@@ -95,12 +96,18 @@ app.use("/graphql", async (c) => {
 	let valid = false
 	try {
 		const { payload, protectedHeader } = await jwtVerify(token, JWKS)
-		valid = payload.claims != undefined && (payload.claims as string[]).includes(c.env.CATALYST_APP_ID)
+		valid = payload.claims != undefined &&
+			c.env.CATALYST_APP_ID!.includes(",") ?
+			// if there are multiple app ids, check if any of them are in the claims
+			c.env.CATALYST_APP_ID!.split(",").map(id => (payload.claims as string[]).includes(id)).some(val => val === true) ?? false
+			// if there is only one app id, check if it is in the claims
+			: (payload.claims as string[]).includes(c.env.CATALYST_APP_ID)
 	} catch (e) {
 		console.error("error validating jwt: ", e)
 		valid = false
 	}
 	c.set('valid', valid)
+	console.warn("valid: ", valid)
 	const yoga = createYoga({
 		schema: gqlSchema,
 		graphqlEndpoint: "/graphql",
@@ -252,46 +259,86 @@ app.use('/', async (c) => {
 							]
 						})
 					}
+				} else {
+					return await lineAPI.reply({
+						replyToken: message.replyToken,
+						messages: [
+							{
+								type: "text",
+								text: `Unable to process ping, incorrect format \"${message.message.text}\"`
+							}]
+					})
 				}
-			} else if (isVideo) {
+			}
+			else if (isVideo) {
 				console.log("doing video upload for: ", message.message)
 				const videoMsg = message.message.text.replace(videoSelector, "")
 				const breakChar = videoMsg.lastIndexOf(".")
-				const [videoLink, coordsString] = [videoMsg.substring(0, breakChar), videoMsg.substring(breakChar+1)]
+				const [videoLink, coordsString] = [videoMsg.substring(0, breakChar), videoMsg.substring(breakChar + 1)]
 				console.log("video link: ", videoLink, "coords: ", coordsString)
 
-				/*
-				curl -X POST \
-  -d '{"url":"https://pub-05275deed7d1427893755b0d87bb7fbe.r2.dev/2024_05_23_13_48_47.MP4","meta":{"name":"2024_05_23_13_48_47.MP4"}}' \
-  -H "Authorization: Bearer ALNaPYNeKIAE8QwXIevAW_mw_fVzlrtHUughneel" \
-  https://api.cloudflare.com/client/v4/accounts/3be6f7bb0cc73869d555e1156586c1f2/stream/copy
-				 */
 				const videoURL = new URL(videoLink)
 				console.log("video url: ", videoURL)
 				console.log(`https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/stream/copy`)
-				console.log({body: JSON.stringify({
+				console.log({
+					body: JSON.stringify({
 						url: videoURL.toString(),
 						meta: {
 							name: coordsString + ".mp4"
 						}
-					})})
+					})
+				})
+
 				const videoUpload = await fetch(`https://api.cloudflare.com/client/v4/accounts/${c.env.CF_ACCOUNT_ID}/stream/copy`,
 					{
-					body: JSON.stringify({
+						body: JSON.stringify({
 							url: videoURL.toString(),
 							meta: {
 								name: coordsString + ".mp4"
 							}
 						}),
-					headers: {
+						headers: {
 							Authorization: `Bearer ${c.env.CF_STREAM_TOKEN}`,
+							"Content-Type": "application/json"
 						},
 						method: "POST"
 					})
+				console.log("video upload repsonse status", videoUpload.status)
+				const uploadResp = await videoUpload.json() as {
+					result: { uid?: string, status: { state: string, errorReasonCode: string, errorReasonText: string } },
+					success: boolean,
+					errors: object[]
+				}
+				console.log("video upload response: ", uploadResp)
+				// check success and status
+				if (!uploadResp.success || uploadResp.result.status.state == "error") {
+					return await lineAPI.reply({
+						replyToken: message.replyToken,
+						messages: [
+							{
+								type: "text",
+								text: `Error uploading video: ${uploadResp.result.status.errorReasonText}`
+							},
+						]
+					})
+				}
 
-				console.log("video upload response: ", await videoUpload.json())
+			c.executionCtx.waitUntil(stub.storeVideoEvent(uploadResp.result.uid!, coordsString))
 
-			} else { // send pings messages
+			const videoSuccessResp = await lineAPI.reply({
+				replyToken: message.replyToken,
+				messages: [
+					{
+						type: "text",
+						text: `video is being uploaded and tagged`
+					},
+				]
+			})
+
+			console.log("video success response: ", videoSuccessResp)
+			return  videoSuccessResp
+		}
+			else { // send pings messages
 				const extraMessages = demoSwitch ? [pingCarousel] : []
 				return lineAPI.reply({
 					replyToken: message.replyToken,
@@ -304,8 +351,9 @@ app.use('/', async (c) => {
 					]
 				})
 			}
+		} else {
+			// do nothing as there is no message
 		}
-
 	}))
 	console.log("responses:", JSON.stringify(msgResps))
 
