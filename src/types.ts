@@ -1,15 +1,27 @@
 import { z } from 'zod';
 import { generate } from 'random-words';
+
+// ---------------- Message payload types ----------------
+const LineTextMessagePayload = z.object({
+	type: z.literal('text'),
+	id: z.string(),
+	quoteToken: z.string(),
+	text: z.string(),
+});
+
+const LineLocationMessagePayload = z.object({
+	type: z.literal('location'),
+	id: z.string(),
+	latitude: z.number(),
+	longitude: z.number(),
+	address: z.string(),
+});
+
+// ---------------- Event wrapper ----------------
+
 export const LinebotMessageEvent = z.object({
-	type: z.enum(['message']),
-	message: z
-		.object({
-			type: z.enum(['text']),
-			id: z.string(),
-			quoteToken: z.string(),
-			text: z.string(),
-		})
-		.optional(),
+	type: z.literal('message'), // LINE always sends "message" for both text & location
+	message: z.union([LineTextMessagePayload, LineLocationMessagePayload]),
 	webhookEventId: z.string(),
 	deliveryContext: z.object({
 		isRedelivery: z.boolean(),

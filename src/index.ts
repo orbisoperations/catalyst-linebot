@@ -102,6 +102,122 @@ app.use('/graphql', async (c) => {
 	return yoga.handle(c.req.raw as Request, c);
 });
 
+// ---------------- Geocode Helper ----------------
+type GeocodeResult = {
+	lat: string;
+	lon: string;
+	display_name: string;
+	address: {
+		neighbourhood: string;
+		suburb: string;
+		village: string;
+		city: string;
+		country: string;
+		postcode: string;
+	};
+};
+
+async function geocodeLocation(locq: string, env: bindings): Promise<GeocodeResult[]> {
+	const url =
+		'https://maptoolkit.p.rapidapi.com/geocode/search?' +
+		new URLSearchParams({ q: locq, countrycodes: 'TW,US', language: 'en', limit: '1' });
+
+	const resp = await fetch(url, {
+		method: 'GET',
+		headers: {
+			'X-RapidAPI-Key': env.RAPID_API_KEY,
+			'X-RapidAPI-Host': 'maptoolkit.p.rapidapi.com',
+		},
+	});
+
+	if (!resp.ok) {
+		throw new Error(`Geocode request failed: ${resp.status} ${resp.statusText}`);
+	}
+
+	const jsonResult = (await resp.json()) as GeocodeResult[];
+	return jsonResult;
+}
+
+// ---------------- Message Handlers ----------------
+
+type LineReplyText = { type: 'text'; text: string };
+
+async function handleLocationMessage({
+	message,
+	stub,
+}: {
+	message: LinebotMessageEvent;
+	stub: DurableObjectStub<LineBotState>;
+}): Promise<LineReplyText | null> {
+	if (message.message.type !== 'location') return null;
+
+	const random = generate({ exactly: 3, wordsPerString: 1, formatter: (w) => w.toUpperCase(), join: '_' });
+
+	const pingEvent = await stub.storePingEvent({
+		title: `Ping at ${message.message.address}`,
+		city: message.message.address,
+		latlong: `${message.message.latitude}, ${message.message.longitude}`,
+		randomPhrase: random,
+		expiry: 0,
+		from: message.source.type === 'user' ? message.source.userId : 'unknown',
+	});
+
+	const detail = new URLSearchParams(pingEvent.coords);
+	return {
+		type: 'text',
+		text: `New Message Published (${detail.get('randomPhrase')}) at ${detail.get('city')} [${detail.get('latlong')}]: ${detail.get(
+			'title'
+		)}`,
+	};
+}
+
+async function handleTextMessage({
+	message,
+	stub,
+	env,
+}: {
+	message: LinebotMessageEvent;
+	stub: DurableObjectStub<LineBotState>;
+	env: bindings;
+}): Promise<LineReplyText | null> {
+	// Format expected: TITLE.LOCATION
+	if (message.message.type !== 'text') return null;
+	const elems = message.message.text.split('.').filter((e) => e.replace(' ', '').length > 0);
+	if (elems.length < 2) return null;
+
+	const [title, locq] = elems;
+
+	let jsonBody: GeocodeResult[] = [];
+
+	try {
+		jsonBody = await geocodeLocation(locq, env);
+	} catch (err) {
+		console.error('Error geocoding location: ', err);
+		return null;
+	}
+
+	if (jsonBody.length === 0) return null;
+
+	const random = generate({ exactly: 3, wordsPerString: 1, formatter: (w) => w.toUpperCase(), join: '_' });
+
+	const pingEvent = await stub.storePingEvent({
+		title,
+		city: `${jsonBody[0].address.neighbourhood}, ${jsonBody[0].address.suburb}, ${jsonBody[0].address.village}, ${jsonBody[0].address.city}`,
+		latlong: `${jsonBody[0].lat}, ${jsonBody[0].lon}`,
+		randomPhrase: random,
+		expiry: 0,
+		from: message.source.type === 'user' ? message.source.userId : 'unknown',
+	});
+
+	const detail = new URLSearchParams(pingEvent.coords);
+	return {
+		type: 'text',
+		text: `New Message Published (${detail.get('randomPhrase')}) at ${detail.get('city')} [${detail.get('latlong')}]: ${detail.get(
+			'title'
+		)}`,
+	};
+}
+
 app.use('/', async (c) => {
 	try {
 		console.log('Linebot webhook endpoint hit');
@@ -168,116 +284,27 @@ app.use('/', async (c) => {
 			messagesQ.map(async (message) => {
 				let lineReplyMessage: { type: 'text'; text: string } | undefined;
 
-				// Process the message
 				try {
 					if (message.message && demoSwitch) {
-						const messageText = message.message.text;
-
-						console.log('Doing geolookup for ', JSON.stringify(message.message));
-
-						// if message follows format then try and create ping out of it
-						const elems = messageText.split('.').filter((element) => element.replace(' ', '').length > 0);
-
-						if (elems.length > 1) {
-							const msg = elems[0];
-							const locq = elems[1];
-							console.log('Doing geo query for location: ', locq);
-							let jsonBody: {
-								lat: string;
-								lon: string;
-								display_name: string;
-								address: {
-									neighbourhood: string;
-									suburb: string;
-									village: string;
-									city: string;
-									country: string;
-									postcode: string;
-								};
-							}[] = [];
-
-							try {
-								const resp = await fetch(
-									'https://maptoolkit.p.rapidapi.com/geocode/search?' +
-										new URLSearchParams({
-											q: locq,
-											countrycodes: 'TW,US',
-											language: 'en',
-											limit: '1',
-										}),
-									{
-										method: 'GET',
-										headers: {
-											'X-RapidAPI-Key': c.env.RAPID_API_KEY,
-											'X-RapidAPI-Host': 'maptoolkit.p.rapidapi.com',
-										},
-									}
-								);
-
-								if (!resp.ok) {
-									throw new Error(`Geocode request failed: ${resp.status} ${resp.statusText}`);
-								} else {
-									console.log('Geocode request successful');
-								}
-
-								jsonBody = await resp.json();
-							} catch (geoErr) {
-								console.error('Geo lookup failed', geoErr);
-								// Inform the user that geolocation failed and terminate processing for this message
-								return lineAPI.reply({
-									replyToken: message.replyToken,
-									messages: [
-										{
-											type: 'text',
-											text: 'Unable to geolocate due to a service error. Please try again later.',
-										},
-									],
-								});
-							}
-
-							console.log('Geocode response: ', JSON.stringify(jsonBody));
-
-							if (jsonBody.length > 0) {
-								const random = generate({
-									exactly: 3,
-									wordsPerString: 1,
-									formatter: (word) => word.toUpperCase(),
-									join: '_',
-								});
-
-								console.log('Storing ping event: ', msg, random);
-
-								const pingEvent = await stub.storePingEvent({
-									title: msg,
-									city: `${jsonBody[0].address.neighbourhood}, ${jsonBody[0].address.suburb}, ${jsonBody[0].address.village}, ${jsonBody[0].address.city}`,
-									latlong: `${jsonBody[0].lat}, ${jsonBody[0].lon}`,
-									randomPhrase: random,
-									expiry: 0, // this is overwritten in the DO
-								});
-
-								console.log('Ping event stored: ', JSON.stringify(pingEvent));
-
-								const pingEventDetail = new URLSearchParams(pingEvent.coords);
-
-								lineReplyMessage = {
-									type: 'text',
-									text: `New Message Published (${pingEventDetail.get('randomPhrase')}) at ${pingEventDetail.get(
-										'city'
-									)} [${pingEventDetail.get('latlong')}]: ${pingEventDetail.get('title')}`,
-								};
-							} else {
-								lineReplyMessage = {
-									type: 'text',
-									text: `Unable to geolocate from message \"${message.message.text}\"`,
-								};
-							}
+						if (message.message.type === 'location') {
+							lineReplyMessage = (await handleLocationMessage({ message, stub })) ?? undefined;
+						} else if (message.message.type === 'text') {
+							lineReplyMessage = (await handleTextMessage({ message, stub, env: c.env })) ?? undefined;
 						}
 					}
 				} catch (err) {
 					console.error('Error processing line message: ', JSON.stringify(message), err);
 				}
 
-				console.log(`Sending reply message to LINE: for ${message.message?.text ?? 'unknown'}: ${JSON.stringify(lineReplyMessage)}`);
+				console.log(
+					`Sending reply message to LINE: for ${
+						message.message.type === 'text'
+							? message.message?.text ?? 'unknown'
+							: message.message.type === 'location'
+							? message.message?.address ?? 'unknown'
+							: 'unknown'
+					}: ${JSON.stringify(lineReplyMessage)}`
+				);
 
 				// if no message, send a default message
 				const extraMessages = demoSwitch ? [pingCarousel] : [];
