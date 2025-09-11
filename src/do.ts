@@ -10,6 +10,7 @@ export interface PingEvent {
 	latlong: string;
 	randomPhrase: string;
 	expiry: number;
+	from: string;
 }
 export class LineBotState extends DurableObject<Env> {
 	async alarmInit(enabled: boolean) {
@@ -171,6 +172,7 @@ export class LineBotState extends DurableObject<Env> {
 				city: ping.city,
 				title: ping.title,
 				randomPhrase: ping.randomPhrase,
+				from: ping.from,
 			});
 			console.log(pings);
 			await this.ctx.storage.put('pings', pings);
@@ -196,6 +198,7 @@ export class LineBotState extends DurableObject<Env> {
 				city: searchParams.has('city') ? searchParams.get('city')! : 'no city provided',
 				title: searchParams.has('title') ? searchParams.get('title')! : 'no title provided',
 				randomPhrase: searchParams.has('randomPhrase') ? searchParams.get('randomPhrase')! : 'no UID provided',
+				from: searchParams.has('from') ? searchParams.get('from')! : 'no from provided',
 			});
 			console.log(pings);
 			await this.ctx.storage.put('pings', pings);

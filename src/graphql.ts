@@ -9,6 +9,7 @@ type LinePing {
     lon: String!
     expiry: Float!
     title: String!
+	from: String!
     UID: String!
 }
 
@@ -27,7 +28,6 @@ export default createSchema({
 				const id = c.env.LineBotState.idFromName('default');
 				const stub: DurableObjectStub<LineBotState> = c.env.LineBotState.get(id);
 				const pings: PingEvent[] = await stub.getPostbackData();
-
 				return pings.map((ping) => {
 					const latlon = ping.latlong.replace(' ', '').split(',');
 					return {
@@ -37,6 +37,7 @@ export default createSchema({
 						lon: latlon[1],
 						expiry: ping.expiry,
 						UID: ping.randomPhrase,
+						from: ping.from,
 					};
 				});
 			},
