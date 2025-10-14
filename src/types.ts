@@ -1,6 +1,21 @@
 import { z } from 'zod';
 import { generate } from 'random-words';
 
+// ---------------- Environment types ----------------
+export const Env = z.object({
+	RAPID_API_KEY: z.string(),
+	LINE_CHANNEL_TOKEN: z.string(),
+	LINE_CHANNEL_SECRET: z.string(),
+	CATALYST_JWK_URL: z.string(),
+	CATALYST_GATEWAY_URL: z.string(),
+	CATALYST_APP_ID: z.string(),
+	CATALYST_GATEWAY_TOKEN: z.string(),
+	CATALYST_JWT_ISSUER: z.string(),
+	DEMO_ACTIVE: z.string(),
+	GRAPHQL_PORT: z.string(),
+	GRAPHQL_HOST: z.string(),
+});
+
 // ---------------- Message payload types ----------------
 const LineTextMessagePayload = z.object({
 	type: z.literal('text'),

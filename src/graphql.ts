@@ -1,6 +1,7 @@
 import { createSchema } from 'graphql-yoga';
 import { Context } from 'hono';
-import { PingEvent, LineBotState } from './do';
+import { PingEvent, LineBotState, getLineBotStateSingleton } from './state';
+import { Env } from './types';
 
 const typeDefs = `
 type LinePing {
@@ -18,16 +19,19 @@ type Query {
     _sdl: String!
 }
 `;
+
+const env = Env.parse(process.env);
+
 export default createSchema({
 	typeDefs: typeDefs,
 	resolvers: {
 		Query: {
-			pings: async (_, {}, c: Context) => {
-				const demoSwitch = c.env.DEMO_ACTIVE === 'true' ? true : false;
-				if (!demoSwitch || !Boolean(c.get('valid'))) return [];
-				const id = c.env.LineBotState.idFromName('default');
-				const stub: DurableObjectStub<LineBotState> = c.env.LineBotState.get(id);
-				const pings: PingEvent[] = await stub.getPostbackData();
+			pings: async (_, {}) => {
+				// TODO: Remove demo switch. Don't know why it's a thing.
+				const demoSwitch = env.DEMO_ACTIVE === 'true' ? true : false;
+				if (!demoSwitch) return [];
+				const linebotState: LineBotState = getLineBotStateSingleton(env);
+				const pings: PingEvent[] = await linebotState.getPostbackData();
 				return pings.map((ping) => {
 					const latlon = ping.latlong.replace(' ', '').split(',');
 					return {
