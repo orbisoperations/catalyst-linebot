@@ -26,5 +26,27 @@ fi
 if command -v /opt/datadog-agent/embedded/bin/security-agent >/dev/null; then
   /opt/datadog-agent/embedded/bin/security-agent start &
 fi
+
+# --- Cloudflared Tunnel (token from env/secret) ---
+# Required: CLOUDFLARE_TUNNEL_TOKEN
+# Optional: TUNNEL_METRICS, TUNNEL_LOGLEVEL (info|warn|error|debug|trace)
+: "${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN is required}"
+
+cloudflared tunnel run \
+  ${TUNNEL_METRICS:+--metrics "${TUNNEL_METRICS}"} \
+  ${TUNNEL_LOGLEVEL:+--loglevel "${TUNNEL_LOGLEVEL}"} \
+  --token "${CLOUDFLARE_TUNNEL_TOKEN}" &
+
+CLOUDFLARED_PID=$!
+
+# simple readiness wait (up to ~30s)
+for i in $(seq 1 30); do
+  if kill -0 "$CLOUDFLARED_PID" 2>/dev/null; then
+    echo "[ok] cloudflared started (pid=$CLOUDFLARED_PID)"
+    break
+  fi
+  sleep 1
+done
+
 # Wrap your app so ptrace can observe it (recommended "wrap" mode)
 exec /opt/datadog-agent/embedded/bin/cws-instrumentation trace -- bun run start
