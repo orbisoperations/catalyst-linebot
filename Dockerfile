@@ -40,7 +40,7 @@ COPY entrypoint.sh .
 FROM base
 
 # CA certs fix for TLS (prevents x509 unknown authority)
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends tini curl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Create directory for persistent sqlite DB (Fly volume mounts here)
 RUN mkdir -p /data && chown -R 1000:1000 /data
@@ -58,10 +58,18 @@ COPY datadog/security-agent.yaml /etc/datadog-agent/security-agent.yaml
 COPY --from=build /app /app
 COPY --from=build /app/entrypoint.sh /entrypoint.sh
 
+# Post Quantum
+
+# Use the static binary to avoid apt repo + autoupdate daemons
+RUN curl -fsSL "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" \
+      -o /usr/local/bin/cloudflared \
+ && chmod +x /usr/local/bin/cloudflared
+
 # Make entrypoint script executable
 RUN chmod +x /entrypoint.sh
 
 EXPOSE 8080
 
-# Simple entrypoint that starts Agent + your app
-ENTRYPOINT ["/entrypoint.sh"]
+# Use tini to reap child processes
+ENTRYPOINT ["/usr/bin/tini","--"]
+CMD ["/entrypoint.sh"]
