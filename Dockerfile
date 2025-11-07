@@ -1,5 +1,7 @@
 # Pull down image from Orbis GHCR and do a fly local only deploy
-FROM ghcr.io/orbisoperations/catalyst-adapter-base:0.1.0 AS base
+# This arg can be overridden by the build-arg BASE_VERSION in the build command
+ARG BASE_VERSION="latest"
+FROM ghcr.io/orbisoperations/catalyst-adapter-base:${BASE_VERSION} AS base
 
 LABEL fly_launch_runtime="Bun"
 
